@@ -1,32 +1,32 @@
-.columns > div {
+.newcolumns > div {
   display: flex;
   flex-direction: column;
 }
 
-.columns img {
+.newcolumns img {
   width: 50%;
 }
 
-.columns > div > div {
+.newcolumns > div > div {
   order: 1;
 }
 
-.columns > div > .columns-img-col {
+.newcolumns > div > .newcolumns-img-col {
   order: 0;
 }
 
-.columns > div > .columns-img-col img {
+.newcolumns > div > .newcolumns-img-col img {
   display: block;
 }
 
 @media (width >= 900px) {
-  .columns > div {
+  .newcolumns > div {
     align-items: center;
     flex-direction: unset;
     gap: 24px;
   }
 
-  .columns > div > div {
+  .newcolumns > div > div {
     flex: 1;
     order: unset;
   }
