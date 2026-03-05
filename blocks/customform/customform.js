@@ -37,10 +37,12 @@ async function prepareRequest(form) {
   return { headers, body, url };
 }
 
-async function saveToSpreadsheet(payload) {
+async function saveToSpreadsheet(payload, spreadsheetUrl) {
+  if (!spreadsheetUrl) {
+    return;
+  }
+  
   try {
-    // Replace with your actual spreadsheet endpoint URL
-    const spreadsheetUrl = '/data/submissions.json';
     const response = await fetch(spreadsheetUrl, {
       method: 'POST',
       headers: {
@@ -68,8 +70,9 @@ async function submitForm(form) {
       body,
     });
     if (response.ok) {
-      // Save data to another spreadsheet
-      await saveToSpreadsheet(payload);
+      // Save data to another spreadsheet if URL is configured
+      const spreadsheetUrl = form.dataset.spreadsheet;
+      await saveToSpreadsheet(payload, spreadsheetUrl);
       
       window.location.href = '/thankyou.html';
     } else {
@@ -396,9 +399,21 @@ function addActiveClassToFirstFieldset(form) {
  * @param {Element} block The block element
  */
 export default async function decorate(block) {
-  const formLink = block.querySelector('a[href$=".json"]');
-  if (formLink) {
+  // Get all links from the block
+  const links = [...block.querySelectorAll('a[href$=".json"]')];
+  
+  if (links.length > 0) {
+    const formLink = links[0]; // First link is the form definition
+    const spreadsheetLink = links.length > 1 ? links[1] : null; // Second link is the spreadsheet submission URL
+    
     const form = await createForm(formLink.href);
-    formLink.replaceWith(form);
+    
+    // Set spreadsheet URL if provided
+    if (spreadsheetLink) {
+      form.dataset.spreadsheet = spreadsheetLink.href;
+    }
+    
+    block.replaceChildren(form);
   }
 }
+
