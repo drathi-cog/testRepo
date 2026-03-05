@@ -1,5 +1,4 @@
 /* eslint-disable linebreak-style */
-import { sampleRUM } from '../../scripts/lib-franklin.js';
 import decorateFieldset from './fieldset.js';
 
 function generateUnique() {
@@ -72,7 +71,6 @@ async function submitForm(form) {
       // Save data to another spreadsheet
       await saveToSpreadsheet(payload);
       
-      sampleRUM('form:submit');
       window.location.href = '/thankyou.html';
     } else {
       const error = await response.text();
