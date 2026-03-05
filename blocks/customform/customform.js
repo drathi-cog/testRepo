@@ -61,23 +61,27 @@ async function saveToSpreadsheet(payload, spreadsheetUrl) {
 
 async function submitForm(form) {
   try {
-    const { headers, body, url } = await prepareRequest(form);
     const { payload } = constructPayload(form);
     
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body,
-    });
-    if (response.ok) {
-      // Save data to another spreadsheet if URL is configured
-      const spreadsheetUrl = form.dataset.spreadsheet;
-      await saveToSpreadsheet(payload, spreadsheetUrl);
+    // Submit data to the spreadsheet URL
+    const spreadsheetUrl = form.dataset.spreadsheet;
+    if (spreadsheetUrl) {
+      const response = await fetch(spreadsheetUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ data: payload }),
+      });
       
-      window.location.href = '/thankyou.html';
+      if (response.ok) {
+        window.location.href = '/thankyou.html';
+      } else {
+        const error = await response.text();
+        throw new Error(error);
+      }
     } else {
-      const error = await response.text();
-      throw new Error(error);
+      throw new Error('Spreadsheet submission URL not configured');
     }
   } catch (error) {
     submissionFailure(error, form);
@@ -174,24 +178,42 @@ let currentFieldsetIndex = 0;
 
 function nextFunc() {
   const fieldsets = document.querySelectorAll('fieldset');
-  fieldsets[currentFieldsetIndex].classList.remove('active');
+  
+  // Only proceed if fieldsets exist
+  if (fieldsets.length === 0) {
+    return;
+  }
+  
+  // Remove active class if current index is valid
+  if (fieldsets[currentFieldsetIndex]) {
+    fieldsets[currentFieldsetIndex].classList.remove('active');
+  }
+  
   // eslint-disable-next-line no-plusplus
   currentFieldsetIndex++;
   if (currentFieldsetIndex >= fieldsets.length) {
     currentFieldsetIndex = 0;
   }
-  fieldsets[currentFieldsetIndex].classList.add('active');
-  // Check if the current fieldset is the last one and show the separate div if it is
-  if (isLastFieldset(fieldsets[currentFieldsetIndex])) {
-    document.getElementById('submit').style.display = 'block';
-  } else {
-    document.getElementById('submit').style.display = 'none';
+  
+  // Add active class to next fieldset
+  if (fieldsets[currentFieldsetIndex]) {
+    fieldsets[currentFieldsetIndex].classList.add('active');
+  }
+  
+  // Check if the current fieldset is the last one and show the submit button
+  const submitButton = document.getElementById('submit');
+  if (submitButton) {
+    if (isLastFieldset(fieldsets[currentFieldsetIndex])) {
+      submitButton.style.display = 'block';
+    } else {
+      submitButton.style.display = 'none';
+    }
   }
 }
 
 function isLastFieldset(fieldset) {
   const fieldsets = document.querySelectorAll('fieldset');
-  return fieldset === fieldsets[fieldsets.length - 1];
+  return fieldsets.length > 0 && fieldset === fieldsets[fieldsets.length - 1];
 }
 
 function createSubmit(fd) {
