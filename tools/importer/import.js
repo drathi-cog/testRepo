@@ -5,12 +5,12 @@
 // ---------------------------------------------------------------------------
 function block(name, rows, doc) {
   const table = doc.createElement('table');
-  const thead = doc.createElement('tr');
+  const headerRow = doc.createElement('tr');
   const th = doc.createElement('th');
   th.setAttribute('colspan', String(Math.max(...rows.map((r) => r.length), 1)));
   th.textContent = name;
-  thead.appendChild(th);
-  table.appendChild(thead);
+  headerRow.appendChild(th);
+  table.appendChild(headerRow);
   rows.forEach((row) => {
     const tr = doc.createElement('tr');
     row.forEach((cell) => {
@@ -25,8 +25,9 @@ function block(name, rows, doc) {
   return table;
 }
 
-function wrapSection(el) {
-  const div = document.createElement('div');
+// Wrap a block table in a <div> so it forms its own EDS section
+function wrapSection(el, doc) {
+  const div = doc.createElement('div');
   div.appendChild(el);
   return div;
 }
@@ -40,12 +41,6 @@ function primaryButton(doc, href, text) {
   strong.appendChild(a);
   p.appendChild(strong);
   return p;
-}
-
-function extractBgImage(el) {
-  // AEM encodes '/' as '\2f' in background-image style attributes
-  const m = (el?.getAttribute('style') ?? '').match(/background-image:\s*url\(([^)]+)\)/i);
-  return m ? m[1].replace(/\\2f/gi, '/').replace(/['"]/g, '').trim() : null;
 }
 
 function fixLazyImages(root) {
@@ -74,7 +69,7 @@ function cleanup(doc) {
     '[class*="chat-widget"]',
     '#drift-widget',
     '#intercom-container',
-    // Sticky bars / overlays
+    // Sticky / overlays
     '.sticky-header',
     '[data-sticky]',
     '#app-loading',
@@ -82,12 +77,15 @@ function cleanup(doc) {
     // Skip links
     '.skip-to-content',
     '#skip-link',
-    // Colgate-specific chrome
+    // Colgate chrome
     '.hamburguer-menu-icon',
     '[class*="exit-warning"]',
     '[class*="language-selector"]',
     '[class*="region-selector"]',
     '.vertical-spacer',
+    // AEM edit-mode artefacts
+    '.new.section',
+    '.aem-Grid-newComponent',
   ]);
 }
 
@@ -118,9 +116,6 @@ function buildMetadata(doc) {
   const twitterCard = doc.querySelector('meta[name="twitter:card"]');
   if (twitterCard) meta['Twitter Card'] = twitterCard.getAttribute('content');
 
-  const twitterTitle = doc.querySelector('meta[name="twitter:title"]');
-  if (twitterTitle) meta['Twitter Title'] = twitterTitle.getAttribute('content');
-
   const robots = doc.querySelector('meta[name="robots"]');
   if (robots) meta.Robots = robots.getAttribute('content');
 
@@ -139,7 +134,7 @@ function buildMetadata(doc) {
     } catch (_) { /* ignore malformed JSON-LD */ }
   }
 
-  return block('Metadata', Object.entries(meta).map(([k, v]) => [k, v ?? '']), doc);
+  return WebImporter.Blocks.getMetadataBlock(doc, meta);
 }
 
 // ---------------------------------------------------------------------------
@@ -164,142 +159,147 @@ function fixLinks(main, url) {
 
 // ---------------------------------------------------------------------------
 // Hero Carousel — homepage + sustainability (≥2 slides)
-// Selectors: section.carousel, .cmp-carousel, .carousel-container
 // ---------------------------------------------------------------------------
 function transformCarousel(main, doc) {
-  const carousel = main.querySelector(
-    'section.carousel, .cmp-carousel, [class*="carousel-container"], [class*="slider"]',
-  );
+  const carousel = main.querySelector([
+    '.cmp-carousel',
+    '[data-cmp-is="carousel"]',
+    'section.carousel',
+    '[class*="carousel-container"]',
+    '[class*="slider-container"]',
+  ].join(', '));
   if (!carousel) return;
 
-  const slides = carousel.querySelectorAll(
-    '.carousel-slide, .cmp-carousel__item, [class*="carousel-item"], article',
-  );
-  if (slides.length < 2) return; // single slide → handled by hero
+  const slides = carousel.querySelectorAll([
+    '.cmp-carousel__item',
+    '[class*="carousel-item"]',
+    '.carousel-slide',
+    'article',
+  ].join(', '));
+  if (slides.length < 2) return; // single slide → hero transformer
 
   const rows = [];
   slides.forEach((slide) => {
     const img = slide.querySelector('img');
-    const bgSrc = extractBgImage(slide) || extractBgImage(slide.querySelector('[style]'));
-    const heading = slide.querySelector('h1, h2, h3');
-    const text = slide.querySelector('p');
-    const cta = slide.querySelector('a');
+    const heading = slide.querySelector('h1, h2, h3, .cmp-teaser__title, .cmp-carousel__title');
+    const text = slide.querySelector('p, .cmp-teaser__description');
+    const cta = slide.querySelector('a.cmp-teaser__action-link, a[class*="btn"], a[class*="cta"], a');
 
     const cell = doc.createElement('div');
-
-    if (img) {
-      cell.appendChild(img.cloneNode(true));
-    } else if (bgSrc) {
-      const bg = doc.createElement('img');
-      bg.src = bgSrc;
-      bg.alt = heading?.textContent?.trim() || '';
-      cell.appendChild(bg);
-    }
+    if (img) cell.appendChild(img.cloneNode(true));
     if (heading) cell.appendChild(heading.cloneNode(true));
     if (text) cell.appendChild(text.cloneNode(true));
     if (cta) cell.appendChild(primaryButton(doc, cta.href, cta.textContent.trim()));
-
     rows.push([cell]);
   });
 
-  if (rows.length > 0) carousel.replaceWith(block('Carousel', rows, doc));
+  if (rows.length > 0) carousel.replaceWith(wrapSection(block('Carousel', rows, doc), doc));
 }
 
 // ---------------------------------------------------------------------------
-// Hero Banner — single full-width banner with optional CTA
-// Selectors: .hero, .cmp-teaser--hero, [class*="hero-banner"], .page-banner
+// Hero Banner — single full-width banner
 // ---------------------------------------------------------------------------
 function transformHero(main, doc) {
-  const hero = main.querySelector(
-    '.hero, .cmp-teaser--hero, [class*="hero-banner"], .our-brands-hero-banner, .page-banner, [class*="page-hero"]',
-  );
+  const hero = main.querySelector([
+    '.cmp-teaser--hero',
+    '[data-cmp-is="teaser"][class*="hero"]',
+    '[class*="hero-banner"]',
+    '.our-brands-hero-banner',
+    '[class*="page-hero"]',
+    '.page-banner',
+    '.hero',
+  ].join(', '));
   if (!hero) return;
 
   const img = hero.querySelector('img');
-  const bgSrc = extractBgImage(hero) || extractBgImage(hero.querySelector('[style]'));
-  const heading = hero.querySelector('h1, h2');
-  const text = hero.querySelector('p');
-  const cta = hero.querySelector('a');
+  const heading = hero.querySelector('h1, h2, .cmp-teaser__title');
+  const text = hero.querySelector('p, .cmp-teaser__description');
+  const cta = hero.querySelector('a.cmp-teaser__action-link, a[class*="btn"], a[class*="cta"], a');
 
   const mediaCell = doc.createElement('div');
-  if (img) {
-    mediaCell.appendChild(img.cloneNode(true));
-  } else if (bgSrc) {
-    const bg = doc.createElement('img');
-    bg.src = bgSrc;
-    bg.alt = heading?.textContent?.trim() || '';
-    mediaCell.appendChild(bg);
-  }
+  if (img) mediaCell.appendChild(img.cloneNode(true));
 
   const contentCell = doc.createElement('div');
   if (heading) contentCell.appendChild(heading.cloneNode(true));
   if (text) contentCell.appendChild(text.cloneNode(true));
   if (cta) contentCell.appendChild(primaryButton(doc, cta.href, cta.textContent.trim()));
 
-  const hasMedia = mediaCell.hasChildNodes();
-  const hasContent = contentCell.hasChildNodes();
-  let rows;
-  if (hasMedia && hasContent) {
-    rows = [[mediaCell, contentCell]];
-  } else if (hasMedia) {
-    rows = [[mediaCell]];
-  } else {
-    rows = [[contentCell]];
-  }
+  const rows = mediaCell.hasChildNodes() && contentCell.hasChildNodes()
+    ? [[mediaCell, contentCell]]
+    : [[mediaCell.hasChildNodes() ? mediaCell : contentCell]];
 
-  if (rows[0][0].hasChildNodes()) hero.replaceWith(block('Hero', rows, doc));
+  if (rows[0][0].hasChildNodes()) {
+    hero.replaceWith(wrapSection(block('Hero', rows, doc), doc));
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Card Grid — 4-up cards (homepage, who-we-are, sustainability reports)
-// Selectors: .card-grid, .cmp-container--cards, [class*="card-grid"]
+// Card Grid — 4-up cards
 // ---------------------------------------------------------------------------
 function transformCards(main, doc) {
-  const grids = main.querySelectorAll(
-    '.card-grid, [class*="card-grid"], [class*="cards-container"], [class*="teaser-grid"]',
-  );
+  const grids = main.querySelectorAll([
+    '[data-cmp-is="list"]',
+    '.cmp-list',
+    '[class*="card-grid"]',
+    '[class*="cards-container"]',
+    '[class*="teaser-grid"]',
+    '.card-grid',
+  ].join(', '));
+
   grids.forEach((grid) => {
-    const cards = grid.querySelectorAll(
-      '.card, .cmp-teaser, article.card, [class*="card-item"], [class*="teaser-item"]',
-    );
+    const cards = grid.querySelectorAll([
+      '.cmp-teaser',
+      '.cmp-list__item',
+      '[data-cmp-is="teaser"]',
+      '[class*="card-item"]',
+      '.card',
+      'article',
+    ].join(', '));
     if (cards.length === 0) return;
 
     const rows = [];
     cards.forEach((card) => {
       const img = card.querySelector('img');
-      const heading = card.querySelector('h3, h4, .card-title, .cmp-teaser__title');
-      const desc = card.querySelector('p, .cmp-teaser__description');
-      const cta = card.querySelector('a');
+      const heading = card.querySelector('h3, h4, .cmp-teaser__title, .cmp-list__item-title');
+      const desc = card.querySelector('p, .cmp-teaser__description, .cmp-list__item-description');
+      const cta = card.querySelector('a.cmp-teaser__action-link, a[class*="btn"], a[class*="cta"], a');
 
       const cell = doc.createElement('div');
       if (img) cell.appendChild(img.cloneNode(true));
       if (heading) cell.appendChild(heading.cloneNode(true));
       if (desc) cell.appendChild(desc.cloneNode(true));
-      // Avoid duplicating the heading link as a CTA
       if (cta && cta !== heading?.querySelector('a') && cta.textContent.trim()) {
         cell.appendChild(primaryButton(doc, cta.href, cta.textContent.trim()));
       }
       rows.push([cell]);
     });
 
-    if (rows.length > 0) grid.replaceWith(block('Cards', rows, doc));
+    if (rows.length > 0) grid.replaceWith(wrapSection(block('Cards', rows, doc), doc));
   });
 }
 
 // ---------------------------------------------------------------------------
 // Awards / Recognition Strip — custom block
-// Selectors: [class*="awards"], [class*="recognition"], [class*="achievements"]
 // ---------------------------------------------------------------------------
 function transformAwards(main, doc) {
-  const section = main.querySelector(
-    '[class*="awards"], [class*="recognition"], [class*="achievements"], [class*="accolades"]',
-  );
+  const section = main.querySelector([
+    '[class*="awards"]',
+    '[class*="recognition"]',
+    '[class*="achievements"]',
+    '[class*="accolades"]',
+    '[class*="logos-strip"]',
+  ].join(', '));
   if (!section) return;
 
   const heading = section.querySelector('h2, h3');
-  const items = section.querySelectorAll(
-    '[class*="award-item"], [class*="badge"], figure, [class*="logo-item"]',
-  );
+  const items = section.querySelectorAll([
+    '[class*="award-item"]',
+    '[class*="badge"]',
+    'figure',
+    '[class*="logo-item"]',
+    'li',
+  ].join(', '));
+  if (items.length === 0) return;
 
   const rows = [];
   if (heading) rows.push([heading.cloneNode(true)]);
@@ -314,57 +314,62 @@ function transformAwards(main, doc) {
     rows.push([imgCell, textCell]);
   });
 
-  if (rows.length > 0) section.replaceWith(block('Awards', rows, doc));
+  if (rows.length > 0) section.replaceWith(wrapSection(block('Awards', rows, doc), doc));
 }
 
 // ---------------------------------------------------------------------------
-// Brand Cards — circular brand cards with category filter (Our Brands page)
-// Selectors: [class*="brand-grid"], [class*="brands-list"]
+// Brand Cards — Our Brands page
 // ---------------------------------------------------------------------------
 function transformBrandCards(main, doc) {
-  const brandGrid = main.querySelector(
-    '[class*="brand-grid"], [class*="brands-list"], [class*="brand-list"]',
-  );
+  const brandGrid = main.querySelector([
+    '[class*="brand-grid"]',
+    '[class*="brands-list"]',
+    '[class*="brand-list"]',
+  ].join(', '));
   if (!brandGrid) return;
 
-  const brands = brandGrid.querySelectorAll(
-    '[class*="brand-card"], [class*="brand-item"], article',
-  );
+  const brands = brandGrid.querySelectorAll([
+    '[class*="brand-card"]',
+    '[class*="brand-item"]',
+    'article',
+    'li',
+  ].join(', '));
   if (brands.length === 0) return;
 
   const rows = [];
   brands.forEach((brand) => {
     const img = brand.querySelector('img');
-    const name = brand.querySelector('h3, h4, p, [class*="brand-name"]');
+    const name = brand.querySelector('h3, h4, [class*="brand-name"]');
     const category = brand.querySelector('[class*="category"], [class*="label"], [class*="tag"]');
     const link = brand.querySelector('a');
 
     const imgCell = doc.createElement('div');
     const contentCell = doc.createElement('div');
-
     if (img) imgCell.appendChild(img.cloneNode(true));
     if (name) contentCell.appendChild(name.cloneNode(true));
     if (category) contentCell.appendChild(category.cloneNode(true));
     if (link) {
-      const ctaText = link.textContent.trim() || name?.textContent?.trim() || 'Learn more';
-      contentCell.appendChild(primaryButton(doc, link.href, ctaText));
+      contentCell.appendChild(
+        primaryButton(doc, link.href, link.textContent.trim() || name?.textContent?.trim() || 'Learn more'),
+      );
     }
-
     rows.push([imgCell, contentCell]);
   });
 
-  if (rows.length > 0) brandGrid.replaceWith(block('Brand Cards', rows, doc));
+  if (rows.length > 0) brandGrid.replaceWith(wrapSection(block('Brand Cards', rows, doc), doc));
 }
 
 // ---------------------------------------------------------------------------
-// Columns — CEO message, core values, sustainability pillars, 2–3 col layouts
-// Selectors: .cmp-container--columns, [class*="pillar"], [class*="three-col"]
+// Columns — CEO message, core values, sustainability pillars
 // ---------------------------------------------------------------------------
 function transformColumns(main, doc) {
-  const containers = main.querySelectorAll(
-    '.cmp-container--columns, [class*="columns-layout"], [class*="pillar-section"], [class*="three-col"], [class*="two-col"]',
-  );
-  containers.forEach((container) => {
+  main.querySelectorAll([
+    '.cmp-container--columns',
+    '[class*="columns-layout"]',
+    '[class*="pillar-section"]',
+    '[class*="three-col"]',
+    '[class*="two-col"]',
+  ].join(', ')).forEach((container) => {
     const cols = [...container.children].filter(
       (c) => c.tagName !== 'SCRIPT' && c.tagName !== 'STYLE',
     );
@@ -376,13 +381,12 @@ function transformColumns(main, doc) {
       return cell;
     });
 
-    container.replaceWith(block('Columns', [row], doc));
+    container.replaceWith(wrapSection(block('Columns', [row], doc), doc));
   });
 }
 
 // ---------------------------------------------------------------------------
 // Accordion — sustainability collapsible sections
-// Selectors: .cmp-accordion, [class*="accordion"], details
 // ---------------------------------------------------------------------------
 function transformAccordion(main, doc) {
   main.querySelectorAll('details').forEach((details) => {
@@ -392,38 +396,46 @@ function transformAccordion(main, doc) {
       if (c.tagName !== 'SUMMARY') body.appendChild(c.cloneNode(true));
     });
     details.replaceWith(
-      block('Accordion', [[summary?.textContent?.trim() || '', body]], doc),
+      wrapSection(block('Accordion', [[summary?.textContent?.trim() || '', body]], doc), doc),
     );
   });
 
-  main.querySelectorAll('.cmp-accordion, [class*="accordion-component"]').forEach((acc) => {
+  main.querySelectorAll([
+    '.cmp-accordion',
+    '[data-cmp-is="accordion"]',
+    '[class*="accordion-component"]',
+  ].join(', ')).forEach((acc) => {
     const items = acc.querySelectorAll('.cmp-accordion__item, [class*="accordion-item"]');
     if (items.length === 0) return;
 
-    const rows = [];
-    items.forEach((item) => {
+    const rows = items.map((item) => {
       const title = item.querySelector(
-        '.cmp-accordion__header, [class*="accordion-title"], [class*="accordion-header"]',
+        '.cmp-accordion__header, button[aria-controls], [class*="accordion-title"]',
       );
       const content = item.querySelector(
         '.cmp-accordion__panel, [class*="accordion-panel"], [class*="accordion-content"]',
       );
       const contentCell = doc.createElement('div');
       if (content) contentCell.innerHTML = content.innerHTML;
-      rows.push([title?.textContent?.trim() || '', contentCell]);
+      return [title?.textContent?.trim() || '', contentCell];
     });
 
-    if (rows.length > 0) acc.replaceWith(block('Accordion', rows, doc));
+    acc.replaceWith(wrapSection(block('Accordion', rows, doc), doc));
   });
 }
 
 // ---------------------------------------------------------------------------
-// Video Embeds — YouTube, Vimeo, AEM cmp-video
+// Video Embeds
 // ---------------------------------------------------------------------------
 function transformVideo(main, doc) {
-  main.querySelectorAll(
-    'iframe[src*="youtube"], iframe[src*="vimeo"], .cmp-video, [class*="video-embed"], [class*="video-container"]',
-  ).forEach((el) => {
+  main.querySelectorAll([
+    'iframe[src*="youtube"]',
+    'iframe[src*="vimeo"]',
+    '.cmp-video',
+    '[data-cmp-is="video"]',
+    '[class*="video-embed"]',
+    '[class*="video-container"]',
+  ].join(', ')).forEach((el) => {
     let src = el.getAttribute('src') || el.getAttribute('data-src') || '';
     if (!src) {
       const iframe = el.querySelector('iframe');
@@ -436,7 +448,7 @@ function transformVideo(main, doc) {
     a.textContent = src;
     const p = doc.createElement('p');
     p.appendChild(a);
-    el.replaceWith(block('Embed', [[p]], doc));
+    el.replaceWith(wrapSection(block('Embed', [[p]], doc), doc));
   });
 }
 
@@ -444,9 +456,12 @@ function transformVideo(main, doc) {
 // Breadcrumbs
 // ---------------------------------------------------------------------------
 function transformBreadcrumbs(main, doc) {
-  const bc = main.querySelector(
-    '.cmp-breadcrumb, [aria-label="Breadcrumb"], [class*="breadcrumb"]',
-  );
+  const bc = main.querySelector([
+    '.cmp-breadcrumb',
+    '[data-cmp-is="breadcrumb"]',
+    '[aria-label="Breadcrumb"]',
+    '[class*="breadcrumb"]',
+  ].join(', '));
   if (!bc) return;
 
   const items = [...bc.querySelectorAll('a, .cmp-breadcrumb__item, li')];
@@ -471,12 +486,12 @@ function transformBreadcrumbs(main, doc) {
 }
 
 // ---------------------------------------------------------------------------
-// Forms — scaffold as EDS Form block pointing to /forms/<id>
+// Forms
 // ---------------------------------------------------------------------------
 function transformForms(main, doc) {
   main.querySelectorAll('form').forEach((form) => {
     const formId = form.id || form.getAttribute('name') || 'contact';
-    form.replaceWith(block('Form', [[`/forms/${formId}`]], doc));
+    form.replaceWith(wrapSection(block('Form', [[`/forms/${formId}`]], doc), doc));
   });
 }
 
@@ -484,15 +499,26 @@ function transformForms(main, doc) {
 // Main export
 // ---------------------------------------------------------------------------
 export default {
+  /**
+   * preprocess runs before transform.
+   * replaceBackgroundByImage converts CSS background-image to <img> elements,
+   * which is required for AEM hero/banner sections to render correctly.
+   */
+  preprocess({ document: doc }) {
+    WebImporter.DOMUtils.replaceBackgroundByImage(doc);
+  },
+
   transform({ document: doc, url }) {
     cleanup(doc);
-    const main = doc.querySelector('main') || doc.body;
+
+    const main = doc.querySelector('main, [role="main"], #main-content, #main')
+      || doc.body;
+
     fixLinks(main, url);
     fixLazyImages(main);
 
     const path = new URL(url).pathname;
 
-    // Run transformers in DOM order
     transformBreadcrumbs(main, doc);
     transformCarousel(main, doc);
     transformHero(main, doc);
@@ -509,7 +535,7 @@ export default {
     transformAwards(main, doc);
     transformForms(main, doc);
 
-    main.appendChild(wrapSection(buildMetadata(doc)));
+    main.append(wrapSection(buildMetadata(doc), doc));
 
     return [{
       element: main,
