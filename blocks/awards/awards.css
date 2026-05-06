@@ -1,0 +1,70 @@
+/* awards block */
+.awards {
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+.awards .awards-heading {
+  margin-bottom: 1.5rem;
+}
+
+.awards .awards-heading h2,
+.awards .awards-heading h3 {
+  font-size: 1.25rem;
+  color: var(--text-color);
+}
+
+.awards > div:not(.awards-heading) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+}
+
+.awards .awards-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.awards .awards-logo img {
+  max-width: 120px;
+  height: auto;
+  object-fit: contain;
+}
+
+.awards .awards-caption {
+  font-size: 0.875rem;
+  color: var(--text-color);
+}
+
+@media (min-width: 600px) {
+  .awards {
+    padding: 2.5rem 2rem;
+  }
+
+  .awards > div:not(.awards-heading) {
+    flex-direction: row;
+    justify-content: center;
+    gap: 1rem;
+  }
+}
+
+@media (min-width: 900px) {
+  .awards {
+    padding: 3rem;
+  }
+
+  .awards-wrapper > .awards-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 2rem;
+  }
+
+  .awards > div:not(.awards-heading) {
+    flex-direction: column;
+    width: 160px;
+  }
+}
