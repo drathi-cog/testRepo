@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -L --max-time 30 -A \"Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36\" \"https://www.aveva.com/\" -o /tmp/aveva.html)",
+      "Read(//tmp/**)",
+      "Bash(awk '/<main id=\"main-content\">/,/<\\\\/main>/' /tmp/aveva.html)",
+      "Bash(curl -s -L --max-time 30 -A \"Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36\" \"https://www.kelloggs.com/en-in/home.html\" -o /tmp/kelloggs.html)",
+      "PowerShell($f = \"$env:TEMP\\\\kelloggs.html\"; \\(Get-Item $f\\).Length; \\(Get-Content $f -Raw\\).Length)",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://www.kelloggs.com/en-in/home.html\" -UseBasicParsing -UserAgent \"Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/120.0.0.0 Safari/537.36\" -MaximumRedirection 5; $r.StatusCode; $r.Headers[\"Content-Type\"]; $r.Content.Length } catch { $_.Exception.Message; $_.Exception.Response.StatusCode })",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "WebFetch(domain:www.kelloggs.com)",
+      "WebSearch",
+      "Bash(git show *)",
+      "Bash(curl -s -L --max-time 30 -A \"Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36\" \"https://tiffany.co.in/\" -o /tmp/tiffany.html)",
+      "Bash(curl -s -o /dev/null -w \"Status: %{http_code}\\\\nSize: %{size_download}\\\\n\" -L \"https://tiffany.co.in/\")",
+      "Bash(grep -v '^\\\\s*$')",
+      "Bash(node -e ' *)",
+      "Bash(cp /tmp/tiffany.html ./tmp-tiffany.html && ls -la tmp-tiffany.html)",
+      "Bash(npm run *)",
+      "Bash(node --check tools/importer/import.js)"
+    ]
+  }
+}

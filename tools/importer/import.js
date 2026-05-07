@@ -1,23 +1,38 @@
 /* global WebImporter */
+/* eslint-disable no-console, no-restricted-syntax */
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 function block(name, rows, doc) {
   const table = doc.createElement('table');
-  const headerRow = doc.createElement('tr');
+  const thead = doc.createElement('tr');
   const th = doc.createElement('th');
   th.setAttribute('colspan', String(Math.max(...rows.map((r) => r.length), 1)));
   th.textContent = name;
-  headerRow.appendChild(th);
-  table.appendChild(headerRow);
+  thead.appendChild(th);
+  table.appendChild(thead);
   rows.forEach((row) => {
     const tr = doc.createElement('tr');
     row.forEach((cell) => {
       const td = doc.createElement('td');
-      // CRITICAL: nodeType check — instanceof Node fails in AEM Importer sandbox
-      if (cell && cell.nodeType) td.appendChild(cell);
-      else td.innerHTML = String(cell ?? '');
+      if (cell == null) {
+        td.innerHTML = '';
+      } else if (cell.nodeType) {
+        td.appendChild(cell);
+      } else if (Array.isArray(cell)) {
+        cell.forEach((c) => {
+          if (c == null) return;
+          if (c.nodeType) td.appendChild(c);
+          else {
+            const span = doc.createElement('span');
+            span.innerHTML = String(c);
+            td.appendChild(span);
+          }
+        });
+      } else {
+        td.innerHTML = String(cell);
+      }
       tr.appendChild(td);
     });
     table.appendChild(tr);
@@ -25,93 +40,325 @@ function block(name, rows, doc) {
   return table;
 }
 
-// Wrap a block table in a <div> so it forms its own EDS section
-function wrapSection(el, doc) {
-  const div = doc.createElement('div');
-  div.appendChild(el);
-  return div;
-}
-
-function primaryButton(doc, href, text) {
-  const p = doc.createElement('p');
-  const strong = doc.createElement('strong');
-  const a = doc.createElement('a');
-  a.href = href;
-  a.textContent = text;
-  strong.appendChild(a);
-  p.appendChild(strong);
-  return p;
+function sectionBreak(doc) {
+  return doc.createElement('hr');
 }
 
 function fixLazyImages(root) {
   root.querySelectorAll('img[data-src], img[data-lazy-src], img[data-original]').forEach((img) => {
-    img.src = img.dataset.src || img.dataset.lazySrc || img.dataset.original || img.src;
+    const src = img.dataset.src || img.dataset.lazySrc || img.dataset.original;
+    if (src) img.src = src;
   });
   root.querySelectorAll('img[data-srcset]').forEach((img) => {
     img.srcset = img.dataset.srcset;
   });
 }
 
+function fixLinks(main, url) {
+  const { origin, hostname } = new URL(url);
+  main.querySelectorAll('a[href]').forEach((a) => {
+    const href = a.getAttribute('href');
+    if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+    try {
+      const abs = new URL(href, origin);
+      a.href = abs.hostname === hostname
+        ? abs.pathname + abs.search + abs.hash
+        : abs.href;
+    } catch (_) { /* leave malformed hrefs */ }
+  });
+  main.querySelectorAll('img[src]').forEach((img) => {
+    try { img.src = new URL(img.getAttribute('src'), origin).href; } catch (_) { /* skip */ }
+  });
+}
+
+// Pull the highest-resolution <source> from a <picture> and rewrite its <img> src.
+// Tiffany's CDN serves several `resize-w:` variants — prefer the largest.
+function upgradeImagesFromSources(root) {
+  root.querySelectorAll('picture').forEach((picture) => {
+    const img = picture.querySelector('img');
+    if (!img) return;
+    const sources = [...picture.querySelectorAll('source[srcset]')];
+    if (!sources.length) return;
+    let bestUrl = null;
+    let bestWidth = 0;
+    sources.forEach((s) => {
+      const ss = s.getAttribute('srcset') || '';
+      const first = ss.split(',')[0].trim().split(/\s+/)[0];
+      const wMatch = first.match(/resize-w:(\d+)/);
+      const w = wMatch ? parseInt(wMatch[1], 10) : 0;
+      if (w > bestWidth) { bestWidth = w; bestUrl = first; }
+      else if (!bestUrl) bestUrl = first;
+    });
+    if (bestUrl) img.src = bestUrl;
+    img.removeAttribute('srcset');
+    sources.forEach((s) => s.remove());
+  });
+}
+
 // ---------------------------------------------------------------------------
-// Cleanup — remove chrome, overlays, and Colgate-specific noise
+// Cleanup — strip header, footer, dynamic widgets, scripts
 // ---------------------------------------------------------------------------
 function cleanup(doc) {
   WebImporter.DOMUtils.remove(doc, [
     'header',
     'nav',
     'footer',
-    // Cookie / consent
-    '#onetrust-consent-sdk',
-    '.cookie-banner',
+    'script',
+    'noscript',
+    'style',
+    'svg',
+    // FDK / Fynd platform chrome
+    '#fdk_default_header',
+    '#fdk_default_footer',
+    '.fdk-theme-footer',
+    '#dy__header-navigation',
+    '#dy__footer',
+    '#dy__footer-links',
+    '#dy__breadcrumb-section',
+    '#dy__newsletter-mobile',
+    // Dynamic Yield placeholders that are empty in SSR
+    '#dy-tiffanyandco-rich-text',
+    '#dy-tiffany-category-block',
+    '#dy__logo-section',
+    '#dy__homepage',
+    // Recommendation slider — empty SSR shell, hydrated client-side
+    '#recommendationSlider',
+    '#feature-slide',
+    '.slick-slider',
+    // Generic widgets
     '[id*="cookie"]',
     '[class*="consent"]',
-    // Chat / support widgets
     '[class*="chat-widget"]',
-    '#drift-widget',
-    '#intercom-container',
-    // Sticky / overlays
-    '.sticky-header',
-    '[data-sticky]',
-    '#app-loading',
-    '.loading-overlay',
-    // Skip links
-    '.skip-to-content',
-    '#skip-link',
-    // Colgate chrome
-    '.hamburguer-menu-icon',
-    '[class*="exit-warning"]',
-    '[class*="language-selector"]',
-    '[class*="region-selector"]',
-    '.vertical-spacer',
-    // AEM edit-mode artefacts
-    '.new.section',
-    '.aem-Grid-newComponent',
+    '#onetrust-consent-sdk',
   ]);
 }
 
 // ---------------------------------------------------------------------------
-// Metadata — OG, Twitter, hreflang, JSON-LD
+// Section transformers — each takes a section element and returns
+// an array of nodes (heading + block table) to replace it with.
+// ---------------------------------------------------------------------------
+
+// Find the first picture/img in a node, return a clone wrapped in a fresh <picture>.
+function pickHeroImage(section, doc) {
+  const pic = section.querySelector('picture');
+  if (pic) return pic.cloneNode(true);
+  const img = section.querySelector('img');
+  if (!img) return null;
+  const newPic = doc.createElement('picture');
+  newPic.appendChild(img.cloneNode(true));
+  return newPic;
+}
+
+// Anchors inside the section that visually represent a "card" (wrap a picture).
+function pickImageAnchors(section) {
+  return [...section.querySelectorAll('a[href]')].filter((a) => a.querySelector('picture, img'));
+}
+
+// All text-only anchors (CTA links without images).
+function pickTextAnchors(section) {
+  return [...section.querySelectorAll('a[href]')].filter((a) => !a.querySelector('picture, img'));
+}
+
+function pickHeadings(section) {
+  return [...section.querySelectorAll('h1, h2, h3')];
+}
+
+// Strong-wrap a link to mark it as a primary button (EDS button convention).
+function asPrimaryButton(anchor, doc) {
+  const p = doc.createElement('p');
+  const strong = doc.createElement('strong');
+  const a = doc.createElement('a');
+  a.href = anchor.getAttribute('href');
+  a.textContent = anchor.textContent.replace(/\s+/g, ' ').trim();
+  strong.appendChild(a);
+  p.appendChild(strong);
+  return p;
+}
+
+// Hero: image + heading + optional CTA button.
+function transformAsHero(section, doc) {
+  const out = [];
+  const cellChildren = [];
+
+  const img = pickHeroImage(section, doc);
+  if (img) cellChildren.push(img);
+
+  pickHeadings(section).forEach((h) => {
+    const clone = doc.createElement(h.tagName.toLowerCase());
+    clone.textContent = h.textContent.replace(/\s+/g, ' ').trim();
+    cellChildren.push(clone);
+  });
+
+  // CTA — prefer the last image-bearing anchor (the section often links the image to the destination)
+  const imageAnchors = pickImageAnchors(section);
+  const textAnchors = pickTextAnchors(section);
+  const cta = textAnchors[0] || imageAnchors[0];
+  if (cta) {
+    const ctaText = cta.textContent.replace(/\s+/g, ' ').trim() || 'Learn More';
+    const ctaLink = doc.createElement('a');
+    ctaLink.href = cta.getAttribute('href');
+    ctaLink.textContent = ctaText;
+    cellChildren.push(asPrimaryButton(ctaLink, doc));
+  }
+
+  if (cellChildren.length === 0) return out;
+  out.push(block('Hero', [[cellChildren]], doc));
+  out.push(sectionBreak(doc));
+  return out;
+}
+
+// Cards: each image-bearing anchor becomes a card row (image | body).
+function transformAsCards(section, doc) {
+  const out = [];
+
+  // Section-level intro headings appear as default content above the block
+  pickHeadings(section).forEach((h) => {
+    const clone = doc.createElement(h.tagName.toLowerCase());
+    clone.textContent = h.textContent.replace(/\s+/g, ' ').trim();
+    out.push(clone);
+  });
+
+  const imageAnchors = pickImageAnchors(section);
+  const rows = imageAnchors.map((a) => {
+    const pic = a.querySelector('picture') || a.querySelector('img').parentElement;
+    const picClone = pic.cloneNode(true);
+
+    // Body cell: extract any text nodes / paragraphs inside the anchor, plus the link itself
+    const bodyParts = [];
+    const paragraphs = [...a.querySelectorAll('p')];
+    if (paragraphs.length > 0) {
+      // Use the actual <p> structure from the source (title + description)
+      paragraphs.forEach((p) => {
+        const pClone = doc.createElement('p');
+        pClone.textContent = p.textContent.replace(/\s+/g, ' ').trim();
+        if (pClone.textContent) bodyParts.push(pClone);
+      });
+      // Add the anchor as a CTA link
+      const span = a.querySelector('span');
+      const ctaText = (span && span.textContent.trim()) || 'Learn More';
+      const ctaP = doc.createElement('p');
+      const ctaLink = doc.createElement('a');
+      ctaLink.href = a.getAttribute('href');
+      ctaLink.textContent = ctaText;
+      ctaP.appendChild(ctaLink);
+      bodyParts.push(ctaP);
+    } else {
+      // Simple label-style card: wrap text in an anchor
+      const label = a.textContent.replace(/\s+/g, ' ').trim();
+      const p = doc.createElement('p');
+      const link = doc.createElement('a');
+      link.href = a.getAttribute('href');
+      link.textContent = label || 'Learn More';
+      p.appendChild(link);
+      bodyParts.push(p);
+    }
+
+    return [picClone, bodyParts];
+  });
+
+  if (rows.length === 0) return out;
+  out.push(block('Cards', rows, doc));
+  out.push(sectionBreak(doc));
+  return out;
+}
+
+// Columns: exactly two image-bearing anchors → two-column block.
+function transformAsColumns(section, doc) {
+  const out = [];
+  const imageAnchors = pickImageAnchors(section);
+  const cells = imageAnchors.map((a) => {
+    const pic = a.querySelector('picture') || a.querySelector('img').parentElement;
+    const picClone = pic.cloneNode(true);
+    const label = a.textContent.replace(/\s+/g, ' ').trim();
+
+    // The Tiffany pattern is "<Collection Name>Shop Now" — split if it ends with Shop Now / similar CTA
+    let title = label;
+    let cta = 'Shop Now';
+    const ctaMatch = label.match(/^(.+?)(Shop Now|Explore|Learn More|Discover)$/i);
+    if (ctaMatch) { title = ctaMatch[1].trim(); cta = ctaMatch[2].trim(); }
+
+    const heading = doc.createElement('h2');
+    heading.textContent = title;
+
+    const ctaP = doc.createElement('p');
+    const ctaLink = doc.createElement('a');
+    ctaLink.href = a.getAttribute('href');
+    ctaLink.textContent = cta;
+    ctaP.appendChild(ctaLink);
+
+    return [picClone, heading, asPrimaryButton(ctaLink, doc)];
+  });
+
+  if (cells.length < 2) return out;
+  // Single row, N columns
+  out.push(block('Columns', [cells], doc));
+  out.push(sectionBreak(doc));
+  return out;
+}
+
+// Decide which transformer to run based on the section's content shape.
+function classifySection(section) {
+  const imageAnchors = pickImageAnchors(section);
+  if (imageAnchors.length >= 3) return 'cards';
+  if (imageAnchors.length === 2) {
+    // Two image-anchors but headings present in only one → hero with secondary link
+    return 'columns';
+  }
+  return 'hero';
+}
+
+function transformSections(main, doc) {
+  const sections = [...main.querySelectorAll('[id^="section_"]')];
+  sections.forEach((section) => {
+    const type = classifySection(section);
+    let replacement = [];
+    if (type === 'cards') replacement = transformAsCards(section, doc);
+    else if (type === 'columns') replacement = transformAsColumns(section, doc);
+    else replacement = transformAsHero(section, doc);
+
+    if (replacement.length === 0) {
+      section.remove();
+      return;
+    }
+    const frag = doc.createDocumentFragment();
+    replacement.forEach((node) => frag.appendChild(node));
+    section.replaceWith(frag);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Metadata
 // ---------------------------------------------------------------------------
 function buildMetadata(doc) {
   const meta = {};
 
   const title = doc.querySelector('title');
-  if (title) meta.Title = title.textContent.trim();
+  if (title) meta.Title = title.textContent.replace(/\s+/g, ' ').trim();
 
   const desc = doc.querySelector('meta[name="description"]');
   if (desc) meta.Description = desc.getAttribute('content');
 
-  const ogImg = doc.querySelector('meta[property="og:image"]');
-  if (ogImg) meta.Image = ogImg.getAttribute('content');
+  const keywords = doc.querySelector('meta[name="keywords"]');
+  if (keywords) meta.Keywords = keywords.getAttribute('content');
 
   const canonical = doc.querySelector('link[rel="canonical"]');
   if (canonical) meta['Canonical URL'] = canonical.getAttribute('href');
+
+  const ogImg = doc.querySelector('meta[property="og:image"]');
+  if (ogImg) {
+    const img = doc.createElement('img');
+    img.src = ogImg.getAttribute('content');
+    meta.Image = img;
+  }
 
   const ogType = doc.querySelector('meta[property="og:type"]');
   if (ogType) meta['OG Type'] = ogType.getAttribute('content');
 
   const ogTitle = doc.querySelector('meta[property="og:title"]');
   if (ogTitle) meta['OG Title'] = ogTitle.getAttribute('content');
+
+  const ogDesc = doc.querySelector('meta[property="og:description"]');
+  if (ogDesc) meta['OG Description'] = ogDesc.getAttribute('content');
 
   const twitterCard = doc.querySelector('meta[name="twitter:card"]');
   if (twitterCard) meta['Twitter Card'] = twitterCard.getAttribute('content');
@@ -126,420 +373,32 @@ function buildMetadata(doc) {
       .join('\n');
   }
 
-  const jsonLd = doc.querySelector('script[type="application/ld+json"]');
-  if (jsonLd) {
-    try {
-      const parsed = JSON.parse(jsonLd.textContent);
-      meta['Schema Type'] = parsed['@type'] || '';
-    } catch (_) { /* ignore malformed JSON-LD */ }
-  }
-
-  return WebImporter.Blocks.getMetadataBlock(doc, meta);
-}
-
-// ---------------------------------------------------------------------------
-// Fix links and image srcs to absolute/relative
-// ---------------------------------------------------------------------------
-function fixLinks(main, url) {
-  const { origin, hostname } = new URL(url);
-  main.querySelectorAll('a[href]').forEach((a) => {
-    try {
-      const abs = new URL(a.getAttribute('href'), origin);
-      a.href = abs.hostname === hostname
-        ? abs.pathname + abs.search + abs.hash
-        : abs.href;
-    } catch (_) { /* leave malformed hrefs */ }
-  });
-  main.querySelectorAll('img[src]').forEach((img) => {
-    try {
-      img.src = new URL(img.getAttribute('src'), origin).href;
-    } catch (_) { /* skip */ }
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Hero Carousel — homepage + sustainability (≥2 slides)
-// ---------------------------------------------------------------------------
-function transformCarousel(main, doc) {
-  const carousel = main.querySelector([
-    '.cmp-carousel',
-    '[data-cmp-is="carousel"]',
-    'section.carousel',
-    '[class*="carousel-container"]',
-    '[class*="slider-container"]',
-  ].join(', '));
-  if (!carousel) return;
-
-  const slides = carousel.querySelectorAll([
-    '.cmp-carousel__item',
-    '[class*="carousel-item"]',
-    '.carousel-slide',
-    'article',
-  ].join(', '));
-  if (slides.length < 2) return; // single slide → hero transformer
-
-  const rows = [];
-  slides.forEach((slide) => {
-    const img = slide.querySelector('img');
-    const heading = slide.querySelector('h1, h2, h3, .cmp-teaser__title, .cmp-carousel__title');
-    const text = slide.querySelector('p, .cmp-teaser__description');
-    const cta = slide.querySelector('a.cmp-teaser__action-link, a[class*="btn"], a[class*="cta"], a');
-
-    const cell = doc.createElement('div');
-    if (img) cell.appendChild(img.cloneNode(true));
-    if (heading) cell.appendChild(heading.cloneNode(true));
-    if (text) cell.appendChild(text.cloneNode(true));
-    if (cta) cell.appendChild(primaryButton(doc, cta.href, cta.textContent.trim()));
-    rows.push([cell]);
-  });
-
-  if (rows.length > 0) carousel.replaceWith(wrapSection(block('Carousel', rows, doc), doc));
-}
-
-// ---------------------------------------------------------------------------
-// Hero Banner — single full-width banner
-// ---------------------------------------------------------------------------
-function transformHero(main, doc) {
-  const hero = main.querySelector([
-    '.cmp-teaser--hero',
-    '[data-cmp-is="teaser"][class*="hero"]',
-    '[class*="hero-banner"]',
-    '.our-brands-hero-banner',
-    '[class*="page-hero"]',
-    '.page-banner',
-    '.hero',
-  ].join(', '));
-  if (!hero) return;
-
-  const img = hero.querySelector('img');
-  const heading = hero.querySelector('h1, h2, .cmp-teaser__title');
-  const text = hero.querySelector('p, .cmp-teaser__description');
-  const cta = hero.querySelector('a.cmp-teaser__action-link, a[class*="btn"], a[class*="cta"], a');
-
-  const mediaCell = doc.createElement('div');
-  if (img) mediaCell.appendChild(img.cloneNode(true));
-
-  const contentCell = doc.createElement('div');
-  if (heading) contentCell.appendChild(heading.cloneNode(true));
-  if (text) contentCell.appendChild(text.cloneNode(true));
-  if (cta) contentCell.appendChild(primaryButton(doc, cta.href, cta.textContent.trim()));
-
-  const rows = mediaCell.hasChildNodes() && contentCell.hasChildNodes()
-    ? [[mediaCell, contentCell]]
-    : [[mediaCell.hasChildNodes() ? mediaCell : contentCell]];
-
-  if (rows[0][0].hasChildNodes()) {
-    hero.replaceWith(wrapSection(block('Hero', rows, doc), doc));
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Card Grid — 4-up cards
-// ---------------------------------------------------------------------------
-function transformCards(main, doc) {
-  const grids = main.querySelectorAll([
-    '[data-cmp-is="list"]',
-    '.cmp-list',
-    '[class*="card-grid"]',
-    '[class*="cards-container"]',
-    '[class*="teaser-grid"]',
-    '.card-grid',
-  ].join(', '));
-
-  grids.forEach((grid) => {
-    const cards = grid.querySelectorAll([
-      '.cmp-teaser',
-      '.cmp-list__item',
-      '[data-cmp-is="teaser"]',
-      '[class*="card-item"]',
-      '.card',
-      'article',
-    ].join(', '));
-    if (cards.length === 0) return;
-
-    const rows = [];
-    cards.forEach((card) => {
-      const img = card.querySelector('img');
-      const heading = card.querySelector('h3, h4, .cmp-teaser__title, .cmp-list__item-title');
-      const desc = card.querySelector('p, .cmp-teaser__description, .cmp-list__item-description');
-      const cta = card.querySelector('a.cmp-teaser__action-link, a[class*="btn"], a[class*="cta"], a');
-
-      const cell = doc.createElement('div');
-      if (img) cell.appendChild(img.cloneNode(true));
-      if (heading) cell.appendChild(heading.cloneNode(true));
-      if (desc) cell.appendChild(desc.cloneNode(true));
-      if (cta && cta !== heading?.querySelector('a') && cta.textContent.trim()) {
-        cell.appendChild(primaryButton(doc, cta.href, cta.textContent.trim()));
-      }
-      rows.push([cell]);
-    });
-
-    if (rows.length > 0) grid.replaceWith(wrapSection(block('Cards', rows, doc), doc));
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Awards / Recognition Strip — custom block
-// ---------------------------------------------------------------------------
-function transformAwards(main, doc) {
-  const section = main.querySelector([
-    '[class*="awards"]',
-    '[class*="recognition"]',
-    '[class*="achievements"]',
-    '[class*="accolades"]',
-    '[class*="logos-strip"]',
-  ].join(', '));
-  if (!section) return;
-
-  const heading = section.querySelector('h2, h3');
-  const items = section.querySelectorAll([
-    '[class*="award-item"]',
-    '[class*="badge"]',
-    'figure',
-    '[class*="logo-item"]',
-    'li',
-  ].join(', '));
-  if (items.length === 0) return;
-
-  const rows = [];
-  if (heading) rows.push([heading.cloneNode(true)]);
-
-  items.forEach((item) => {
-    const img = item.querySelector('img');
-    const caption = item.querySelector('p, figcaption, span, h4');
-    const imgCell = doc.createElement('div');
-    const textCell = doc.createElement('div');
-    if (img) imgCell.appendChild(img.cloneNode(true));
-    if (caption) textCell.innerHTML = caption.innerHTML;
-    rows.push([imgCell, textCell]);
-  });
-
-  if (rows.length > 0) section.replaceWith(wrapSection(block('Awards', rows, doc), doc));
-}
-
-// ---------------------------------------------------------------------------
-// Brand Cards — Our Brands page
-// ---------------------------------------------------------------------------
-function transformBrandCards(main, doc) {
-  const brandGrid = main.querySelector([
-    '[class*="brand-grid"]',
-    '[class*="brands-list"]',
-    '[class*="brand-list"]',
-  ].join(', '));
-  if (!brandGrid) return;
-
-  const brands = brandGrid.querySelectorAll([
-    '[class*="brand-card"]',
-    '[class*="brand-item"]',
-    'article',
-    'li',
-  ].join(', '));
-  if (brands.length === 0) return;
-
-  const rows = [];
-  brands.forEach((brand) => {
-    const img = brand.querySelector('img');
-    const name = brand.querySelector('h3, h4, [class*="brand-name"]');
-    const category = brand.querySelector('[class*="category"], [class*="label"], [class*="tag"]');
-    const link = brand.querySelector('a');
-
-    const imgCell = doc.createElement('div');
-    const contentCell = doc.createElement('div');
-    if (img) imgCell.appendChild(img.cloneNode(true));
-    if (name) contentCell.appendChild(name.cloneNode(true));
-    if (category) contentCell.appendChild(category.cloneNode(true));
-    if (link) {
-      contentCell.appendChild(
-        primaryButton(doc, link.href, link.textContent.trim() || name?.textContent?.trim() || 'Learn more'),
-      );
-    }
-    rows.push([imgCell, contentCell]);
-  });
-
-  if (rows.length > 0) brandGrid.replaceWith(wrapSection(block('Brand Cards', rows, doc), doc));
-}
-
-// ---------------------------------------------------------------------------
-// Columns — CEO message, core values, sustainability pillars
-// ---------------------------------------------------------------------------
-function transformColumns(main, doc) {
-  main.querySelectorAll([
-    '.cmp-container--columns',
-    '[class*="columns-layout"]',
-    '[class*="pillar-section"]',
-    '[class*="three-col"]',
-    '[class*="two-col"]',
-  ].join(', ')).forEach((container) => {
-    const cols = [...container.children].filter(
-      (c) => c.tagName !== 'SCRIPT' && c.tagName !== 'STYLE',
-    );
-    if (cols.length < 2) return;
-
-    const row = cols.map((col) => {
-      const cell = doc.createElement('div');
-      cell.innerHTML = col.innerHTML;
-      return cell;
-    });
-
-    container.replaceWith(wrapSection(block('Columns', [row], doc), doc));
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Accordion — sustainability collapsible sections
-// ---------------------------------------------------------------------------
-function transformAccordion(main, doc) {
-  main.querySelectorAll('details').forEach((details) => {
-    const summary = details.querySelector('summary');
-    const body = doc.createElement('div');
-    [...details.children].forEach((c) => {
-      if (c.tagName !== 'SUMMARY') body.appendChild(c.cloneNode(true));
-    });
-    details.replaceWith(
-      wrapSection(block('Accordion', [[summary?.textContent?.trim() || '', body]], doc), doc),
-    );
-  });
-
-  main.querySelectorAll([
-    '.cmp-accordion',
-    '[data-cmp-is="accordion"]',
-    '[class*="accordion-component"]',
-  ].join(', ')).forEach((acc) => {
-    const items = acc.querySelectorAll('.cmp-accordion__item, [class*="accordion-item"]');
-    if (items.length === 0) return;
-
-    const rows = items.map((item) => {
-      const title = item.querySelector(
-        '.cmp-accordion__header, button[aria-controls], [class*="accordion-title"]',
-      );
-      const content = item.querySelector(
-        '.cmp-accordion__panel, [class*="accordion-panel"], [class*="accordion-content"]',
-      );
-      const contentCell = doc.createElement('div');
-      if (content) contentCell.innerHTML = content.innerHTML;
-      return [title?.textContent?.trim() || '', contentCell];
-    });
-
-    acc.replaceWith(wrapSection(block('Accordion', rows, doc), doc));
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Video Embeds
-// ---------------------------------------------------------------------------
-function transformVideo(main, doc) {
-  main.querySelectorAll([
-    'iframe[src*="youtube"]',
-    'iframe[src*="vimeo"]',
-    '.cmp-video',
-    '[data-cmp-is="video"]',
-    '[class*="video-embed"]',
-    '[class*="video-container"]',
-  ].join(', ')).forEach((el) => {
-    let src = el.getAttribute('src') || el.getAttribute('data-src') || '';
-    if (!src) {
-      const iframe = el.querySelector('iframe');
-      src = iframe?.getAttribute('src') || iframe?.getAttribute('data-src') || '';
-    }
-    if (!src) return;
-
-    const a = doc.createElement('a');
-    a.href = src;
-    a.textContent = src;
-    const p = doc.createElement('p');
-    p.appendChild(a);
-    el.replaceWith(wrapSection(block('Embed', [[p]], doc), doc));
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Breadcrumbs
-// ---------------------------------------------------------------------------
-function transformBreadcrumbs(main, doc) {
-  const bc = main.querySelector([
-    '.cmp-breadcrumb',
-    '[data-cmp-is="breadcrumb"]',
-    '[aria-label="Breadcrumb"]',
-    '[class*="breadcrumb"]',
-  ].join(', '));
-  if (!bc) return;
-
-  const items = [...bc.querySelectorAll('a, .cmp-breadcrumb__item, li')];
-  if (items.length === 0) return;
-
-  const cell = doc.createElement('div');
-  items.forEach((item) => {
-    if (item.tagName === 'A') {
-      cell.appendChild(item.cloneNode(true));
-    } else {
-      const link = item.querySelector('a');
-      if (link) cell.appendChild(link.cloneNode(true));
-      else {
-        const span = doc.createElement('span');
-        span.textContent = item.textContent.trim();
-        cell.appendChild(span);
-      }
-    }
-  });
-
-  bc.replaceWith(block('Breadcrumbs', [[cell]], doc));
-}
-
-// ---------------------------------------------------------------------------
-// Forms
-// ---------------------------------------------------------------------------
-function transformForms(main, doc) {
-  main.querySelectorAll('form').forEach((form) => {
-    const formId = form.id || form.getAttribute('name') || 'contact';
-    form.replaceWith(wrapSection(block('Form', [[`/forms/${formId}`]], doc), doc));
-  });
+  return block('Metadata', Object.entries(meta).map(([k, v]) => [k, v ?? '']), doc);
 }
 
 // ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 export default {
-  /**
-   * preprocess runs before transform.
-   * replaceBackgroundByImage converts CSS background-image to <img> elements,
-   * which is required for AEM hero/banner sections to render correctly.
-   */
-  preprocess({ document: doc }) {
-    WebImporter.DOMUtils.replaceBackgroundByImage(doc);
-  },
-
   transform({ document: doc, url }) {
     cleanup(doc);
 
-    const main = doc.querySelector('main, [role="main"], #main-content, #main')
-      || doc.body;
+    // Tiffany page content lives inside the FDK theme wrapper, not <main>.
+    // Pick the largest container that holds the section_* divs.
+    const sectionParent = doc.querySelector('[id^="section_"]')?.parentElement;
+    const main = sectionParent || doc.querySelector('main') || doc.body;
 
-    fixLinks(main, url);
     fixLazyImages(main);
+    upgradeImagesFromSources(main);
+    fixLinks(main, url);
 
-    const path = new URL(url).pathname;
+    transformSections(main, doc);
 
-    transformBreadcrumbs(main, doc);
-    transformCarousel(main, doc);
-    transformHero(main, doc);
-    transformAccordion(main, doc);
-    transformVideo(main, doc);
-    transformColumns(main, doc);
-
-    if (path.includes('/local-brands') || path.includes('/our-brands')) {
-      transformBrandCards(main, doc);
-    } else {
-      transformCards(main, doc);
-    }
-
-    transformAwards(main, doc);
-    transformForms(main, doc);
-
-    main.append(wrapSection(buildMetadata(doc), doc));
+    main.appendChild(buildMetadata(doc));
 
     return [{
       element: main,
-      path: path.replace(/\/$/, '') || '/index',
+      path: new URL(url).pathname.replace(/\/$/, '') || '/index',
     }];
   },
 };

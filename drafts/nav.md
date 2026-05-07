@@ -1,34 +1,40 @@
 # Nav
 
-- [Who We Are](/who-we-are)
-  - [Leadership](/who-we-are/leadership)
-  - [Board of Directors](/who-we-are/board-of-directors)
-  - [Diversity, Equity & Inclusion](/who-we-are/diversity-equity-and-inclusion)
-  - [Governance](/who-we-are/governance)
-  - [Company History](/who-we-are/company-history)
-  - [Policies](/who-we-are/policies)
-  - [Awards & Recognition](/who-we-are/awards)
-- [Our Brands](/local-brands)
-  - [Colgate](/local-brands/colgate)
-  - [Palmolive](/local-brands/palmolive)
-- [Innovation](/innovation)
-  - [Technology](/innovation/technology)
-  - [Consumer Trust](/innovation/consumer-trust)
-  - [Brand Experiences](/innovation/brand-experiences)
-  - [Clinical Trials](/innovation/clinical-trials)
-  - [Innovation History](/innovation/history)
-- [Sustainability](/sustainability)
-  - [2025 Strategy](/sustainability/2025-strategy)
-  - [Achievements](/sustainability/achievements)
-  - [UN SDG Alignment](/sustainability/un-sdg)
-  - [Governance](/sustainability/governance)
-  - [Policies](/sustainability/policies)
-- [Community Impact](/community-impact)
-  - [Bright Smiles, Bright Futures](/community-impact/bright-smiles-bright-futures)
-  - [Oral Health](/community-impact/oral-health)
-  - [Water Conservation](/community-impact/water-conservation)
-  - [Skill Building](/community-impact/skill-building)
+- [![AVEVA](/content/dam/aveva/images/logos/aveva/aveva-logo.png)](/en/)
+
+## Solutions
+- [Featured Solutions](/en/solutions/)
+- [Engineering](/en/solutions/engineering/)
+- [Operations](/en/solutions/operations/)
+- [Data Management](/en/solutions/data-management/)
+- [Data Visualization](/en/solutions/data-visualization/)
+- [CONNECT](/en/products/connect/)
+- [Subscription Options](/en/about/subscription-options/)
+
+## Products
+- [Featured Products](/en/products/)
+- [Engineering](/en/products/engineering/)
+- [Operations](/en/products/operations/)
+- [Data Management](/en/products/data-management/)
+- [Data Visualization](/en/products/data-visualization/)
+
+## Industries
+- [Chemicals](/en/industries/chemicals/)
+- [Oil & Gas](/en/industries/oil-and-gas/)
+- [Power & Utilities](/en/industries/power-and-utilities/)
+- [Manufacturing](/en/industries/manufacturing/)
+
+## Support & Success
+- [Customer Support](/en/support/)
+- [Training](/en/training/)
+- [Documentation](/en/documentation/)
+
+## About
+- [About AVEVA](/en/about/)
+- [Newsroom](/en/about/newsroom/)
+- [Careers](/en/about/careers/)
+- [Contact Us](/en/contact-us/)
 
 ---
 
-[Contact Us](/contact)
+[Contact Us](/en/contact-us/)

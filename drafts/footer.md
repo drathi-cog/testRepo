@@ -1,35 +1,34 @@
 # Footer
 
+![AVEVA](/content/dam/aveva/images/logos/aveva/footer-logo.png)
+
 ## Company
+- [Investors](/en/about/investors/)
+- [Partners](/en/about/partners/)
+- [Careers](/en/about/careers/)
+- [AVEVA Speak Up](https://secure.ethicspoint.eu/domain/media/en/gui/107161/)
+- [Anti-Slavery and Human Trafficking Statement](/en/legal/anti-slavery-human-trafficking/)
 
-- [Who We Are](/who-we-are)
-- [Our Brands](/local-brands)
-- [Innovation](/innovation)
-- [Sustainability](/sustainability)
-- [Community Impact](/community-impact)
+## Resources
+- [Newsroom](/en/about/newsroom/)
+- [Events](/en/about/events/)
+- [Blog](/en/blog/)
+- [Customer Stories](/en/perspectives/customer-stories/)
 
-## Careers & Investors
+## Support
+- [Customer Support](/en/support/)
+- [Training](/en/training/)
+- [Documentation](/en/documentation/)
+- [Contact Us](/en/contact-us/)
 
-- [Careers](/careers)
-- [Investors](/investors)
-- [Suppliers](/suppliers)
-
-## Help
-
-- [Site Map](/site-map)
-- [Contact Us](/contact)
-- [Where to Buy](/where-to-buy)
-
-## Other Sites
-
-- [Colgate.com](https://www.colgate.com)
-- [ColgateProfessional.com](https://www.colgateprofessional.com)
-- [Idea Submission](https://www.colgatepalmolive.com/en-us/idea-submission)
+## Connect
+- [LinkedIn](https://www.linkedin.com/company/aveva/)
+- [X / Twitter](https://twitter.com/avevagroup)
+- [YouTube](https://www.youtube.com/avevagroup)
+- [Facebook](https://www.facebook.com/avevasolutions/)
 
 ---
 
-[Twitter](https://twitter.com/cp_news) | [LinkedIn](https://www.linkedin.com/company/colgate-palmolive) | [YouTube](https://www.youtube.com/colgatepalmolive) | [Instagram](https://www.instagram.com/colgatepalmolive)
+© AVEVA Group Limited or its subsidiaries. All rights reserved.
 
-© 2024 Colgate-Palmolive Company. All rights reserved.
-
-[Terms of Use](/terms-of-use) | [Privacy Policy](/privacy-policy) | [Cookie Consent](#)
+[Privacy Policy](/en/legal/privacy-policy/) | [Cookie Policy](/en/legal/cookie-policy/) | [Terms of Use](/en/legal/terms-of-use/) | [Legal](/en/legal/)
